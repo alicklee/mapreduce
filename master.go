@@ -4,6 +4,7 @@ package mapreduce
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"sync"
 )
@@ -25,6 +26,7 @@ type Master struct {
 	workers  []string      // List of registered worker addresses
 	listener net.Listener  // Network listener for RPC server
 	shutdown chan struct{} // Channel to signal shutdown to all goroutines
+	stats    []int
 }
 
 // newMaster creates and initializes a new Master instance
@@ -68,7 +70,7 @@ func Sequential(
 		case reduceParse:
 			master.runReduceTasks(reduceF)
 		}
-	})
+	}, nil)
 	return nil
 }
 
@@ -93,6 +95,7 @@ func (mr *Master) run(
 	files []string,
 	nReduce int,
 	schedule func(phase jobParse),
+	finish func(),
 ) {
 	defer mr.cleanup()
 
@@ -102,6 +105,7 @@ func (mr *Master) run(
 
 	schedule(mapParse)
 	schedule(reduceParse)
+	finish()
 	mr.merge()
 }
 
@@ -143,7 +147,7 @@ func (mr *Master) forwardRegistration(ch chan string) {
 //   - files: List of input files
 //   - nReduce: Number of reduce tasks
 //   - master: Master node identifier
-func Distributed(jobName jobParse, files []string, nReduce int, master int) (mr *Master) {
+func Distributed(jobName jobParse, files []string, nReduce int, master string) (mr *Master) {
 	mr = &Master{
 		jobName: jobName,
 		files:   files,
@@ -158,6 +162,9 @@ func Distributed(jobName jobParse, files []string, nReduce int, master int) (mr 
 		go mr.forwardRegistration(ch)
 
 		schedule(mr.jobName, mr.files, mr.nReduce, phase, ch)
+	}, func() {
+		mr.stats = mr.killWorkers()
+		mr.stopRPCServer()
 	})
 
 	return mr
@@ -169,4 +176,20 @@ func (mr *Master) cleanup() {
 		mr.listener.Close()
 	}
 	close(mr.shutdown)
+}
+
+func (mr *Master) killWorkers() []int {
+	mr.Lock()
+	defer mr.Unlock()
+	ntask := make([]int, 0, len(mr.workers))
+	for _, w := range mr.workers {
+		fmt.Printf("Master:Shutdown worker %s\n", w)
+		var reply ShutdownReply
+		ok := call(w, ShutdownMethod, new(struct{}), &reply)
+		if !ok {
+			log.Fatalf("Master:RPC %s Shutdown failed", w)
+		}
+		ntask = append(ntask, reply.Ntasks)
+	}
+	return ntask
 }

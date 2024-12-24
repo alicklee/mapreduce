@@ -32,20 +32,19 @@ func (mr *Master) startRPCServer() {
 		for {
 			select {
 			case <-mr.shutdown:
-				break
+				return
 			default:
 			}
 			conn, err := mr.listener.Accept()
 			if err != nil {
 				log.Fatalf("re")
-				break
-			} else {
-				go func() {
-					rpcServer.ServeConn(conn)
-					conn.Close()
-					fmt.Println("RegisterServer: done!")
-				}()
+				return
 			}
+			go func() {
+				rpcServer.ServeConn(conn)
+				conn.Close()
+				fmt.Println("RegisterServer: done!")
+			}()
 		}
 	}()
 }

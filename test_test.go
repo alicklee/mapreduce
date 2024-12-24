@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 const (
 	nNumber = 100
+	nMap    = 10
+	nReduce = 5
 )
 
 // Create a file include N numbers
@@ -66,4 +69,28 @@ func makeInputs(num int) []string {
 		file.Close()
 	}
 	return names
+}
+
+func setup() *Master {
+	fmt.Printf("Setup Master")
+	files := makeInputs(nMap)
+	master := "master"
+	mr := Distributed("test", files, nReduce, master)
+	return mr
+}
+
+func workerFlag(num int) string {
+	s := "824-"
+	s += strconv.Itoa(os.Getuid()) + "/"
+	os.Mkdir(s, 0777)
+	s += "mr"
+	s += strconv.Itoa(os.Getpid()) + "-" + strconv.Itoa(num)
+	return s
+}
+
+func TestBasic(t *testing.T) {
+	mr := setup()
+	for i := 0; i < 2; i++ {
+		go RunWorker(mr.address, workerFlag(i), MapFunc, ReduceFunc, -1)
+	}
 }

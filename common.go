@@ -1,32 +1,41 @@
+// Package mapreduce implements a distributed MapReduce framework
+// that supports both sequential and distributed execution modes.
 package mapreduce
 
 import (
+	"fmt"
 	"hash/fnv"
 	"strconv"
 )
 
-type jobParse string
-
-const (
-	mapParse    jobParse = "Map"
-	reduceParse jobParse = "Reduce"
-)
-
-// Constants for RPC method names
-const (
-	RegisterMethod = "Master.Register" // Method name for worker registration
-	DoTaskMethod   = "Worker.DoTask"   // Method name for task execution
-	ShutdownMethod = "Worker.Shutdown" // Method name for worker shutdown
-)
-
-// 用于保存需要传递给map和reduce的KV数据对
+// KeyValue represents a key-value pair emitted by Map functions
+// and processed by Reduce functions.
 type KeyValue struct {
 	Key   string
 	Value string
 }
 
-func mergeName(jobName jobParse, reduceTask int) string {
-	return "./assets/result/mrtmp." + string(jobName) + "-res-" + strconv.Itoa(reduceTask)
+// jobParse represents the type of job phase in the MapReduce framework
+type jobParse string
+
+const (
+	// mapParse represents the Map phase of MapReduce
+	mapParse jobParse = "Map"
+
+	// reduceParse represents the Reduce phase of MapReduce
+	reduceParse jobParse = "Reduce"
+)
+
+// mergeName constructs the name of an intermediate file that
+// stores the intermediate data for a specific reduce task.
+//
+// Parameters:
+//   - jobName: The name of the MapReduce job
+//   - id: The ID of the reduce task
+//
+// Returns the constructed file name.
+func mergeName(jobName jobParse, id int) string {
+	return fmt.Sprintf("mrtmp.%v-%d", jobName, id)
 }
 
 func reduceName(jobName jobParse, mapTaskNumber int, reduceTask int) string {

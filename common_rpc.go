@@ -1,4 +1,5 @@
-// Package mapreduce provides RPC-related types and utilities for the MapReduce framework.
+// Package mapreduce provides RPC-related types and utilities
+// for communication between master and worker nodes.
 package mapreduce
 
 import (
@@ -6,12 +7,19 @@ import (
 	"net/rpc"
 )
 
-// RegisterArgs represents the arguments for worker registration RPC.
+// Constants for RPC method names
+const (
+	RegisterMethod = "Master.Register" // Method name for worker registration
+	DoTaskMethod   = "Worker.DoTask"   // Method name for task execution
+	ShutdownMethod = "Worker.Shutdown" // Method name for worker shutdown
+)
+
+// RegisterArgs represents the arguments for worker registration RPC
 type RegisterArgs struct {
 	Worker string // Network address of the registering worker
 }
 
-// DoTaskArgs encapsulates the arguments needed for task execution RPCs.
+// DoTaskArgs encapsulates the arguments needed for task execution RPCs
 type DoTaskArgs struct {
 	JobName    jobParse // Name of the MapReduce job
 	File       string   // Input file for Map task or intermediate file for Reduce task
@@ -24,7 +32,7 @@ type DoTaskArgs struct {
 	OtherTaskNumber int
 }
 
-// ShutdownReply contains the response data for worker shutdown RPC.
+// ShutdownReply contains the response data for worker shutdown RPC
 type ShutdownReply struct {
 	Ntasks int // Number of tasks completed by the worker before shutdown
 }
@@ -38,18 +46,16 @@ type ShutdownReply struct {
 //
 // Returns true if the RPC call was successful, false otherwise.
 func call(srv string, rpcName string, args interface{}, reply interface{}) bool {
-	// Establish RPC connection using Unix domain socket
+	if err := validateRPCArgs(srv, rpcName, args); err != nil {
+		return false
+	}
 	c, err := rpc.Dial("unix", srv)
 	if err != nil {
 		return false
 	}
 	defer c.Close()
 
-	// Perform the RPC call
-	if err := c.Call(rpcName, args, reply); err != nil {
-		return false
-	}
-	return true
+	return c.Call(rpcName, args, reply) == nil
 }
 
 // validateRPCArgs checks if the common RPC arguments are valid.
