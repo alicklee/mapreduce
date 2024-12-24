@@ -1,78 +1,140 @@
 # MapReduce Framework
 
-A distributed computing framework implementation based on Google's MapReduce paper, supporting both sequential and distributed execution modes.
+A distributed MapReduce implementation in Go, inspired by MIT 6.824 distributed systems course.
 
-## Model Definition
+## Features
 
-### Map Function
-Each Map function processes input data blocks of identical structure and size, generating multiple intermediate data blocks.
+- Distributed processing with master-worker architecture
+- Automatic task distribution and failure handling
+- Support for custom map and reduce functions
+- Fault tolerance with task retry mechanism
+- Efficient result merging and sorting
 
-### Reduce Function
-Reduce nodes receive and consolidate intermediate data, processing it to generate final results.
+## Usage Example
 
-## Implementation Steps
+Here's a simple example that counts word occurrences in text files:
 
-1. **Data Preparation**
-   - Large dataset is divided into equal-sized blocks
-   - Job programs are prepared for processing
+```go
+package main
 
-2. **System Architecture**
-   - Master node for job scheduling
-   - Worker nodes for Map and Reduce processing
+import (
+    "strings"
+    "github.com/yourusername/mapreduce"
+)
 
-3. **Job Execution Flow**
-   - User submits task to master node
-   - Master assigns Map tasks to available workers
-   - Master assigns Reduce tasks to available workers
-   - Map workers execute programs and process data
-   - Map workers generate intermediate results
-   - Map workers notify master of completion and result locations
-   - Master waits for all Map tasks to complete
-   - Reduce workers fetch intermediate results
-   - Reduce workers consolidate final results
+// MapFunc splits text into words and emits (word, "1") pairs
+func MapFunc(file string, content string) []mapreduce.KeyValue {
+    words := strings.Fields(content)
+    var results []mapreduce.KeyValue
+    for _, word := range words {
+        results = append(results, mapreduce.KeyValue{
+            Key:   word,
+            Value: "1",
+        })
+    }
+    return results
+}
 
-## Execution Modes
+// ReduceFunc counts occurrences of each word
+func ReduceFunc(key string, values []string) string {
+    return fmt.Sprintf("%d", len(values))
+}
 
-1. **Sequential Execution**
-   - Single-threaded execution
-   - Useful for debugging and testing
-
-2. **Concurrent Execution**
-   - Distributed processing
-   - Parallel execution of tasks
-   - Worker pool management
-   - Fault tolerance
-
-## Key Features
-
-- Dynamic worker registration
-- Automatic task retry on failures
-- RPC-based communication
-- Unix domain socket support
-- Intermediate result management
-- Task scheduling and coordination
-
-
-## Project Structure
+func main() {
+    // Configure the job
+    inputFiles := []string{"file1.txt", "file2.txt"}
+    nReduce := 5
+    
+    // Create and start the master
+    master := mapreduce.Distributed(
+        "word-count",  // job name
+        inputFiles,    // input files
+        nReduce,       // number of reduce tasks
+        "master.sock", // master socket path
+    )
+    
+    // Start some workers
+    for i := 0; i < 3; i++ {
+        go mapreduce.RunWorker(
+            master.Address(),           // master address
+            fmt.Sprintf("worker%d", i), // worker ID
+            MapFunc,                    // map function
+            ReduceFunc,                 // reduce function
+            -1,                        // number of tasks (use -1 for unlimited)
+        )
+    }
+    
+    // Wait for completion
+    master.Wait()
+}
 ```
-.
-├── common.go            # Common types and utilities
-├── common_map.go        # Map phase implementation
-├── common_reduce.go     # Reduce phase implementation
-├── common_rpc.go        # RPC communication
-├── master.go            # Master node implementation
-├── master_rpc.go        # Master RPC server
-├── master_splitmerge.go # File splitting and merging
-├── schedule.go          # Task scheduling
-└── worker.go            # Worker node implementation
+
+### Input Files
+Create text files in the `./assets/input/` directory:
+```
+file1.txt:
+hello world
+hello mapreduce
+
+file2.txt:
+world of
+mapreduce
 ```
 
+### Output
+The results will be written to `./assets/result/mrt.result.txt`:
+```
+hello: [2]
+mapreduce: [2]
+of: [1]
+world: [2]
+```
+
+## Running Tests
+
+```bash
+# Run all tests
+go test
+
+# Run specific test
+go test -run TestBasic
+
+# Run with timeout
+go test -timeout 2m
+```
 
 ## Implementation Details
 
-The framework follows the MapReduce paper's design principles:
-1. Master-Worker architecture
-2. Fault-tolerant task execution
-3. Intermediate result handling
-4. Automatic task redistribution
-5. Worker pool management
+1. **Map Phase**: 
+   - Splits input into tasks
+   - Processes each file independently
+   - Generates intermediate key-value pairs
+
+2. **Reduce Phase**:
+   - Collects intermediate results
+   - Groups values by key
+   - Applies reduce function to each group
+
+3. **Merge Phase**:
+   - Combines all reduce outputs
+   - Sorts results by key
+   - Writes final output file
+
+## Error Handling
+
+- Automatic retry for failed tasks
+- Exponential backoff for retries
+- Graceful worker failure handling
+- Proper cleanup of temporary files
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
