@@ -10,101 +10,143 @@ import (
 	"path/filepath"
 )
 
-// startRPCServer initializes and starts the RPC server for the master node.
-// It handles worker registration and task distribution through RPC calls.
-//
-// The server setup process:
-// 1. Validates the master address
-// 2. Creates a new RPC server instance
-// 3. Registers the master's RPC methods
-// 4. Sets up a Unix domain socket listener
-// 5. Starts accepting connections in a separate goroutine
-//
-// Error handling:
-//   - Fatally exits if master address is empty
-//   - Creates parent directory if it doesn't exist
-//   - Retries listener creation after directory creation
-func (mr *Master) startRPCServer() {
-	if mr.address == "" {
-		log.Fatalf("Master address cannot be empty")
+// RPCServer manages the RPC service for the master node
+type RPCServer struct {
+	address  string       // Unix domain socket path
+	listener net.Listener // Network listener
+	server   *rpc.Server  // RPC server instance
+}
+
+// NewRPCServer creates a new RPC server instance
+func NewRPCServer(address string) *RPCServer {
+	return &RPCServer{
+		address: address,
+		server:  rpc.NewServer(),
+	}
+}
+
+// Start initializes and starts the RPC server
+func (s *RPCServer) Start(master *Master) error {
+	if err := s.validateSetup(); err != nil {
+		return err
 	}
 
-	// Create a new RPC server and register master's methods
-	rpcServer := rpc.NewServer()
-	if err := rpcServer.Register(mr); err != nil {
-		log.Fatalf("Register masterRPC server failed with error: %v\n", err)
+	if err := s.registerMaster(master); err != nil {
+		return err
 	}
 
+	if err := s.setupListener(); err != nil {
+		return err
+	}
+
+	go s.acceptConnections(master.shutdown)
+	return nil
+}
+
+// validateSetup checks if the server can be started
+func (s *RPCServer) validateSetup() error {
+	if s.address == "" {
+		return fmt.Errorf("master address cannot be empty")
+	}
+	return nil
+}
+
+// registerMaster registers the master's RPC methods
+func (s *RPCServer) registerMaster(master *Master) error {
+	if err := s.server.Register(master); err != nil {
+		return fmt.Errorf("failed to register master: %v", err)
+	}
+	return nil
+}
+
+// setupListener creates and configures the network listener
+func (s *RPCServer) setupListener() error {
 	// Clean up any existing socket file
-	os.Remove(mr.address)
+	os.Remove(s.address)
 
-	log.Printf("Starting RPC server at: %s", mr.address)
+	log.Printf("Starting RPC server at: %s", s.address)
 
-	// Attempt to create the listener
-	l, e := net.Listen("unix", mr.address)
-	if e != nil {
-		log.Printf("Failed to listen on %s: %v\n", mr.address, e)
+	// Create listener
+	l, err := s.createListener()
+	if err != nil {
+		return err
+	}
+
+	s.listener = l
+	return nil
+}
+
+// createListener attempts to create a Unix domain socket listener
+func (s *RPCServer) createListener() (net.Listener, error) {
+	l, err := net.Listen("unix", s.address)
+	if err != nil {
 		// Try to create parent directory if it doesn't exist
-		if dir := filepath.Dir(mr.address); dir != "" {
+		if dir := filepath.Dir(s.address); dir != "" {
 			if err := os.MkdirAll(dir, 0777); err != nil {
-				log.Fatalf("Failed to create directory %s: %v", dir, err)
+				return nil, fmt.Errorf("failed to create directory %s: %v", dir, err)
 			}
-			// Try listening again after creating directory
-			l, e = net.Listen("unix", mr.address)
-			if e != nil {
-				log.Fatalf("Listen master rpc address with error: %v\n", e)
+			// Retry listener creation
+			l, err = net.Listen("unix", s.address)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create listener: %v", err)
 			}
 		}
 	}
-	mr.listener = l
+	return l, nil
+}
 
-	// Start accepting connections in a separate goroutine
-	go func() {
-		for {
-			select {
-			case <-mr.shutdown:
-				return
-			default:
-			}
-			conn, err := mr.listener.Accept()
+// acceptConnections handles incoming RPC connections
+func (s *RPCServer) acceptConnections(shutdown chan struct{}) {
+	for {
+		select {
+		case <-shutdown:
+			return
+		default:
+			conn, err := s.listener.Accept()
 			if err != nil {
 				log.Printf("RPC server accept error: %v", err)
 				return
 			}
-			go func() {
-				rpcServer.ServeConn(conn)
-				conn.Close()
-			}()
+			go s.handleConnection(conn)
 		}
-	}()
+	}
 }
 
-// Shutdown handles the graceful shutdown of the master's RPC server.
-// It closes the listener and logs the shutdown event.
-//
-// Parameters:
-//   - _: Unused arguments required by RPC interface
-//
-// Returns:
-//   - error: Always returns nil as shutdown errors are logged but not propagated
-func (mr *Master) Shutdown(_, _ *struct{}) error {
-	log.Printf("Shutdown: registration server\n")
-	mr.listener.Close()
+// handleConnection processes a single RPC connection
+func (s *RPCServer) handleConnection(conn net.Conn) {
+	defer conn.Close()
+	s.server.ServeConn(conn)
+}
+
+// Stop gracefully shuts down the RPC server
+func (s *RPCServer) Stop() error {
+	if s.listener != nil {
+		return s.listener.Close()
+	}
 	return nil
 }
 
-// stopRPCServer initiates the shutdown of the RPC server by making a shutdown RPC call.
-// This ensures a clean shutdown of the server and its connections.
-//
-// The function:
-// 1. Makes a shutdown RPC call to the master
-// 2. Logs any failures during shutdown
-// 3. Prints confirmation of successful shutdown
+// startRPCServer is the entry point for starting the master's RPC service
+func (mr *Master) startRPCServer() {
+	server := NewRPCServer(mr.address)
+	if err := server.Start(mr); err != nil {
+		log.Fatalf("Failed to start RPC server: %v", err)
+	}
+	mr.listener = server.listener
+}
+
+// Shutdown handles the graceful shutdown of the master's RPC server
+func (mr *Master) Shutdown(_, _ *struct{}) error {
+	log.Printf("Shutdown: registration server\n")
+	return mr.listener.Close()
+}
+
+// stopRPCServer initiates the shutdown of the RPC server
 func (mr *Master) stopRPCServer() {
 	var reply ShutdownReply
 	ok := call(mr.address, "Master.Shutdown", new(struct{}), &reply)
 	if !ok {
 		log.Fatalf("RPC: Stop failed!!!\n")
 	}
-	fmt.Println("stop registration down")
+	fmt.Println("RPC server shutdown complete")
 }
