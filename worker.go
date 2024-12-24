@@ -62,7 +62,6 @@ func RunWorker(
 	reduceF func(string, []string) string,
 	nRPC int,
 ) error {
-	// Initialize worker
 	wk := &Worker{
 		name:    me,
 		MapF:    mapF,
@@ -70,55 +69,44 @@ func RunWorker(
 		nRPC:    nRPC,
 	}
 
-	// Setup RPC server
 	rpcs := rpc.NewServer()
 	rpcs.Register(wk)
 	os.Remove(me)
-
-	// Start listening for RPC requests
 	l, err := net.Listen("unix", me)
 	if err != nil {
-		log.Fatalf("RunWorker: Worker %s error: %v", me, err)
+		return fmt.Errorf("RunWorker: worker %s error: %v", me, err)
 	}
 	wk.listener = l
 
-	// Register with master
-	wk.register(masterAddress)
-
-	// Main RPC handling loop
-	for {
-		wk.Lock()
-		if wk.nRPC == 0 {
-			wk.Unlock()
-			break
-		}
-
-		conn, err := wk.listener.Accept()
-		if err != nil {
-			wk.Unlock()
-			break
-		}
-
-		wk.Lock()
-		wk.nRPC--
-		wk.Unlock()
-		go rpc.ServeConn(conn)
-
-		wk.listener.Close()
-		fmt.Printf("RunWorker: %s completed RPC\n", me)
-		wk.Unlock()
+	// Register with master before serving
+	if err := wk.register(masterAddress); err != nil {
+		l.Close()
+		return err
 	}
+
+	// Serve RPC requests
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				break
+			}
+			go rpcs.ServeConn(conn)
+		}
+	}()
 
 	return nil
 }
 
 // register notifies the master of this worker's existence
-func (wk *Worker) register(master string) {
+func (wk *Worker) register(master string) error {
 	args := &RegisterArgs{Worker: wk.name}
 	ok := call(master, RegisterMethod, args, new(struct{}))
 	if !ok {
 		log.Printf("Register: RPC %s master error\n", master)
+		return fmt.Errorf("Register: RPC %s master error", master)
 	}
+	return nil
 }
 
 // Shutdown handles the worker shutdown request from master.

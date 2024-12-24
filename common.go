@@ -5,6 +5,8 @@ package mapreduce
 import (
 	"fmt"
 	"hash/fnv"
+	"log"
+	"os"
 	"strconv"
 )
 
@@ -34,8 +36,14 @@ const (
 //   - id: The ID of the reduce task
 //
 // Returns the constructed file name.
-func mergeName(jobName jobParse, id int) string {
-	return fmt.Sprintf("mrtmp.%v-%d", jobName, id)
+func mergeName(jobName jobParse, reduceTask int) string {
+	// Create output directory if it doesn't exist
+	outDir := "./assets/output"
+	if err := os.MkdirAll(outDir, 0777); err != nil {
+		log.Printf("Failed to create output directory: %v", err)
+	}
+
+	return fmt.Sprintf("%s/mrtmp.%v-%d", outDir, jobName, reduceTask)
 }
 
 func reduceName(jobName jobParse, mapTaskNumber int, reduceTask int) string {

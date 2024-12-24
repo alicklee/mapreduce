@@ -105,7 +105,9 @@ func (mr *Master) run(
 
 	schedule(mapParse)
 	schedule(reduceParse)
-	finish()
+	if finish != nil {
+		finish()
+	}
 	mr.merge()
 }
 
@@ -127,17 +129,27 @@ func (mr *Master) Register(args *RegisterArgs, _ *struct{}) error {
 func (mr *Master) forwardRegistration(ch chan string) {
 	i := 0
 	for {
-		mr.Lock()
-		if len(mr.workers) > i {
-			w := mr.workers[i]
-			i++ // Increment index before unlocking
-			go func(worker string) {
-				ch <- worker // Use parameter to avoid race condition
-			}(w)
-		} else {
-			mr.newCond.Wait()
+		select {
+		case <-mr.shutdown:
+			close(ch)
+			return
+		default:
+			mr.Lock()
+			if len(mr.workers) > i {
+				w := mr.workers[i]
+				i++
+				select {
+				case ch <- w:
+				case <-mr.shutdown:
+					mr.Unlock()
+					close(ch)
+					return
+				}
+			} else {
+				mr.newCond.Wait()
+			}
+			mr.Unlock()
 		}
-		mr.Unlock()
 	}
 }
 
@@ -149,10 +161,13 @@ func (mr *Master) forwardRegistration(ch chan string) {
 //   - master: Master node identifier
 func Distributed(jobName jobParse, files []string, nReduce int, master string) (mr *Master) {
 	mr = &Master{
-		jobName: jobName,
-		files:   files,
-		nReduce: nReduce,
+		jobName:  jobName,
+		files:    files,
+		nReduce:  nReduce,
+		address:  master,
+		shutdown: make(chan struct{}),
 	}
+	mr.newCond = sync.NewCond(mr)
 
 	mr.startRPCServer() // Start RPC server
 
@@ -160,13 +175,13 @@ func Distributed(jobName jobParse, files []string, nReduce int, master string) (
 	go mr.run(mr.jobName, mr.files, mr.nReduce, func(phase jobParse) {
 		ch := make(chan string)
 		go mr.forwardRegistration(ch)
-
 		schedule(mr.jobName, mr.files, mr.nReduce, phase, ch)
 	}, func() {
 		mr.stats = mr.killWorkers()
 		mr.stopRPCServer()
 	})
 
+	log.Printf("Starting master at %s", master)
 	return mr
 }
 
@@ -192,4 +207,9 @@ func (mr *Master) killWorkers() []int {
 		ntask = append(ntask, reply.Ntasks)
 	}
 	return ntask
+}
+
+// Wait blocks until the MapReduce job is complete
+func (mr *Master) Wait() {
+	<-mr.shutdown
 }

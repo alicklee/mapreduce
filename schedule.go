@@ -1,20 +1,37 @@
+// Package mapreduce implements a distributed MapReduce framework
 package mapreduce
 
 import (
-	"fmt"
 	"sync"
+	"time"
 )
 
-// schedule manages task distribution to workers in a MapReduce job.
-// It handles both Map and Reduce phases by assigning tasks to available workers
-// and ensuring all tasks complete successfully.
+// schedule manages task distribution and execution in a MapReduce job.
+// It coordinates the assignment of map or reduce tasks to available workers
+// and ensures all tasks complete successfully.
+//
+// The scheduling process works as follows:
+// 1. Determines the number of tasks based on the current phase
+// 2. Creates a channel to distribute task numbers
+// 3. Assigns tasks to available workers as they register
+// 4. Handles task failures by re-queueing failed tasks
+// 5. Waits for all tasks to complete before proceeding
 //
 // Parameters:
-//   - jobName: The name/identifier of the MapReduce job
+//   - jobName: Unique identifier for the MapReduce job
 //   - mapFiles: List of input files for map tasks
-//   - nReduce: Number of reduce tasks
+//   - nReduce: Number of reduce tasks to create
 //   - phase: Current execution phase (map or reduce)
 //   - registerChan: Channel providing available worker addresses
+type taskContext struct {
+	worker      string   // Address of the worker to execute the task
+	taskNum     int      // Task number within the current phase
+	phase       jobParse // Current phase (map or reduce)
+	jobName     jobParse // Name of the MapReduce job
+	mapFiles    []string // Input files for map phase
+	nOtherTasks int      // Number of tasks in the other phase
+}
+
 func schedule(
 	jobName jobParse,
 	mapFiles []string,
@@ -23,82 +40,114 @@ func schedule(
 	registerChan chan string,
 ) {
 	var (
-		nTasks      int // Total number of tasks for current phase
-		nOtherTasks int // Number of tasks for the other phase
+		nTasks      int
+		nOtherTasks int
 		wg          sync.WaitGroup
-		mu          sync.Mutex // Protects the tasks slice
 	)
 
-	// Determine task counts based on the current phase
 	if phase == mapParse {
 		nTasks, nOtherTasks = len(mapFiles), nReduce
 	} else {
 		nTasks, nOtherTasks = nReduce, len(mapFiles)
 	}
 
-	// Initialize task queue
-	tasks := initTasks(nTasks)
+	// Create buffered channels for task distribution
+	taskChan := make(chan int, nTasks)
+	failedTasks := make(chan int, nTasks)
 
-	// Process tasks until all are completed
-	for len(tasks) > 0 {
-		taskNum := getNextTask(&mu, &tasks)
-		worker := <-registerChan
-		wg.Add(1)
-
-		go executeTask(
-			taskContext{
-				worker:      worker,
-				taskNum:     taskNum,
-				phase:       phase,
-				jobName:     jobName,
-				mapFiles:    mapFiles,
-				nOtherTasks: nOtherTasks,
-			},
-			&wg,
-			&mu,
-			&tasks,
-			registerChan,
-		)
+	// Initialize task channel
+	for i := 0; i < nTasks; i++ {
+		taskChan <- i
 	}
+
+	done := make(chan struct{})
+	taskCount := nTasks // Track remaining tasks
+	var mu sync.Mutex   // Protect taskCount
+
+	go func() {
+		for {
+			select {
+			case taskNum, ok := <-taskChan:
+				if !ok {
+					close(done)
+					return
+				}
+				worker := <-registerChan
+				wg.Add(1)
+
+				go func(taskNum int, worker string) {
+					defer wg.Done()
+					success := false
+					maxRetries := 5
+
+					// Implement exponential backoff retry
+					for retries := 0; retries < maxRetries && !success; retries++ {
+						success = executeTask(taskContext{
+							worker:      worker,
+							taskNum:     taskNum,
+							phase:       phase,
+							jobName:     jobName,
+							mapFiles:    mapFiles,
+							nOtherTasks: nOtherTasks,
+						})
+
+						if success {
+							mu.Lock()
+							taskCount--
+							if taskCount == 0 {
+								close(taskChan)
+								close(failedTasks)
+							}
+							mu.Unlock()
+							break
+						}
+
+						if retries < maxRetries-1 {
+							backoff := time.Duration(1<<uint(retries)) * 100 * time.Millisecond
+							time.Sleep(backoff)
+						}
+					}
+
+					if !success {
+						select {
+						case failedTasks <- taskNum:
+							// Task queued for retry
+						case <-done:
+							// System is shutting down
+						}
+					}
+					registerChan <- worker
+				}(taskNum, worker)
+
+			case taskNum, ok := <-failedTasks:
+				if !ok {
+					continue
+				}
+				select {
+				case taskChan <- taskNum:
+					// Task requeued
+				case <-done:
+					// System is shutting down
+					return
+				}
+			}
+		}
+	}()
 
 	wg.Wait()
-	fmt.Printf("Schedule: %v phase done\n", phase)
+	<-done
 }
 
-type taskContext struct {
-	worker      string
-	taskNum     int
-	phase       jobParse
-	jobName     jobParse
-	mapFiles    []string
-	nOtherTasks int
-}
-
-func initTasks(nTasks int) []int {
-	tasks := make([]int, nTasks)
-	for i := range tasks {
-		tasks[i] = i
-	}
-	return tasks
-}
-
-func getNextTask(mu *sync.Mutex, tasks *[]int) int {
-	mu.Lock()
-	defer mu.Unlock()
-
-	taskNum := (*tasks)[0]
-	*tasks = (*tasks)[1:]
-	return taskNum
-}
-
-func executeTask(
-	ctx taskContext,
-	wg *sync.WaitGroup,
-	mu *sync.Mutex,
-	tasks *[]int,
-	registerChan chan string,
-) {
-	// Prepare task arguments
+// executeTask attempts to execute a single task on a worker.
+// It prepares the task arguments and makes an RPC call to the worker.
+//
+// Parameters:
+//   - ctx: Context containing all information needed for task execution
+//
+// Returns:
+//   - bool: true if task completed successfully, false if it failed
+func executeTask(ctx taskContext) bool {
+	// Prepare task arguments for RPC call
 	taskArgs := &DoTaskArgs{
 		JobName:         ctx.jobName,
 		Phase:           ctx.phase,
@@ -107,25 +156,11 @@ func executeTask(
 	}
 
 	// Set input file for map tasks
+	// Reduce tasks don't need an input file specified
 	if ctx.phase == mapParse {
 		taskArgs.File = ctx.mapFiles[ctx.taskNum]
 	}
 
-	// Execute the task
-	success := call(ctx.worker, DoTaskMethod, taskArgs, new(struct{}))
-
-	if success {
-		wg.Done()
-		// Return worker to the pool
-		go func() { registerChan <- ctx.worker }()
-	} else {
-		// Handle task failure
-		mu.Lock()
-		*tasks = append(*tasks, ctx.taskNum)
-		mu.Unlock()
-		wg.Done()
-
-		fmt.Printf("Task failed: phase=%v, task=%d, worker=%s\n",
-			ctx.phase, ctx.taskNum, ctx.worker)
-	}
+	// Execute the task via RPC and return success status
+	return call(ctx.worker, DoTaskMethod, taskArgs, new(struct{}))
 }

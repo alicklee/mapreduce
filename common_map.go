@@ -1,48 +1,83 @@
+// Package mapreduce implements a distributed MapReduce framework
 package mapreduce
 
 import (
 	"encoding/json"
+	"io/ioutil"
 	"log"
 	"os"
 )
 
-// doMap implements a map management function that reads content from an input file
-// splits the output into a specified number of intermediate files, and processes the content
-// according to a custom splitting standard.
+// doMap manages the map phase of a MapReduce job.
+// It reads input data, applies the map function, and partitions the results
+// into intermediate files for the reduce phase.
+//
+// The map phase works as follows:
+// 1. Reads the entire input file into memory
+// 2. Applies the user's map function to generate key-value pairs
+// 3. Partitions the pairs across nReduce intermediate files
+// 4. Writes each partition using JSON encoding
+//
+// Parameters:
+//   - jobName: Unique identifier for the MapReduce job
+//   - mapTaskNumber: Index of this map task (0-based)
+//   - inFile: Path to the input file to process
+//   - nReduce: Number of reduce tasks (determines number of partitions)
+//   - mapF: User-defined function to generate key-value pairs
+//
+// Error handling:
+//   - Fatally exits if the input file cannot be read
+//   - Fatally exits if intermediate files cannot be created
+//   - Fatally exits if JSON encoding fails
+//
+// The intermediate files use JSON encoding to ensure reliable
+// data transfer between map and reduce phases.
 func doMap(
 	jobName jobParse,
 	mapTaskNumber int,
-	inputFile string,
+	inFile string,
 	nReduce int,
 	mapF func(string, string) []KeyValue,
 ) {
-	// Read content from the input file inputFile
-	content, err := os.ReadFile(inputFile)
+	// Read the entire input file into memory
+	// This simplifies the map function interface
+	file, err := os.Open(inFile)
 	if err != nil {
-		log.Fatalf("Read the content of file failed %v\n", err)
+		log.Fatalf("doMap: open file %s error %v", inFile, err)
+	}
+	defer file.Close()
+
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Fatalf("doMap: read file %s error %v", inFile, err)
 	}
 
-	// Process the content by calling mapF and split the output into map task results
-	kvs := mapF(inputFile, string(content))
+	// Apply the user's map function to generate key-value pairs
+	// The function processes the entire file content at once
+	kva := mapF(inFile, string(content))
 
-	// Create nReduce number of encoders for intermediate files
+	// Create encoders and files for each reduce partition
+	// Each encoder will handle key-value pairs for one reducer
 	encoders := make([]*json.Encoder, nReduce)
+	files := make([]*os.File, nReduce)
+
 	for i := 0; i < nReduce; i++ {
-		// Generate the name for the intermediate file
-		fileName := reduceName(jobName, mapTaskNumber, i)
-		f, err := os.Create(fileName)
+		file, err := os.Create(reduceName(jobName, mapTaskNumber, i))
 		if err != nil {
-			log.Fatalf("create file [%s] failed with error : %v\n", fileName, err)
+			log.Fatalf("doMap: create file error %v", err)
 		}
-		defer f.Close()
-		encoders[i] = json.NewEncoder(f)
+		defer file.Close()
+		encoders[i] = json.NewEncoder(file)
+		files[i] = file
 	}
 
-	// Classify the key-value pairs into the nReduce files based on hash values
-	for _, v := range kvs {
-		index := ihash(v.Key) % nReduce
-		if err := encoders[index].Encode(&v); err != nil {
-			log.Fatalf("Unable to write to file\n")
+	// Partition map output by hashing each key
+	// This distributes the work evenly across reducers
+	for _, kv := range kva {
+		index := ihash(kv.Key) % nReduce
+		err := encoders[index].Encode(&kv)
+		if err != nil {
+			log.Fatalf("doMap: encode error %v", err)
 		}
 	}
 }
