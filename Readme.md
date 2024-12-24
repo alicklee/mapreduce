@@ -40,7 +40,7 @@ Reduce nodes receive and consolidate intermediate data, processing it to generat
 2. **Concurrent Execution**
    - Distributed processing
    - Parallel execution of tasks
-   - Worker pool managemen
+   - Worker pool management
    - Fault tolerance
 
 ## Key Features
@@ -53,6 +53,7 @@ Reduce nodes receive and consolidate intermediate data, processing it to generat
 - Task scheduling and coordination
 
 ## Project Structur
+.
 ├── common.go # Common types and utilities
 ├── common_map.go # Map phase implementation
 ├── common_reduce.go # Reduce phase implementation
