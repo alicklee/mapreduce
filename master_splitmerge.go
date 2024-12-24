@@ -9,10 +9,10 @@ import (
 	"sort"
 )
 
-func (mr *Master) merge(jobName jobParse, nReduce int) {
+func (mr *Master) merge() {
 	result := make(map[string][]string)
-	for i := 0; i < nReduce; i++ {
-		fileName := mergeName(jobName, i)
+	for i := 0; i < mr.nReduce; i++ {
+		fileName := mergeName(mr.jobName, i)
 		f, err := os.Open(fileName)
 		if err != nil {
 			log.Fatalf("Read file [%s] with error : %v\n", fileName, err)

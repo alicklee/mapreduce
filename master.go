@@ -1,6 +1,15 @@
 package mapreduce
 
-type Master struct{}
+import "sync"
+
+type Master struct {
+	address string // master node address
+	sync.Mutex
+	workers []string // workers RPC address cache
+	jobName jobParse // job name
+	files   []string // input files
+	nReduce int      // the number of reduce node
+}
 
 // Sequential executes a MapReduce job sequentially, useful for debugging or single-node environments.
 // Parameters:
@@ -17,46 +26,39 @@ func Sequential(
 	reduceF func(string, []string) string,
 ) {
 	// Initialize Master to manage tasks
-	master := newMaster()
+	master := newMaster("master")
 
 	// Schedule map tasks
 	master.run(jobName, files, nReduce, func(phase jobParse) {
 		switch phase {
 		case mapParse:
-			runMapTasks(jobName, files, nReduce, mapF)
+			master.runMapTasks(mapF)
 		case reduceParse:
-			runReduceTasks(jobName, nReduce, len(files), reduceF)
+			master.runReduceTasks(reduceF)
 		}
 	})
 }
 
 // runMapTasks executes all Map tasks.
-func runMapTasks(
-	jobName jobParse,
-	files []string,
-	nReduce int,
-	mapF func(string, string) []KeyValue,
-) {
-	for i, file := range files {
-		doMap(jobName, i, file, nReduce, mapF)
+func (mr *Master) runMapTasks(mapF func(string, string) []KeyValue) {
+	for i, file := range mr.files {
+		doMap(mr.jobName, i, file, mr.nReduce, mapF)
 	}
 }
 
 // runReduceTasks executes all Reduce tasks.
-func runReduceTasks(
-	jobName jobParse,
-	nReduce int,
-	nFiles int,
-	reduceF func(string, []string) string,
-) {
-	for i := 0; i < nReduce; i++ {
-		doReduce(jobName, i, mergeName(jobName, i), nFiles, reduceF)
+func (mr *Master) runReduceTasks(reduceF func(string, []string) string) {
+	nFiles := len(mr.files)
+	for i := 0; i < mr.nReduce; i++ {
+		doReduce(mr.jobName, i, mergeName(mr.jobName, i), nFiles, reduceF)
 	}
 }
 
 // newMaster creates a new Master instance.
-func newMaster() *Master {
-	return &Master{}
+func newMaster(master string) *Master {
+	return &Master{
+		address: master,
+	}
 }
 
 // run schedules the Map and Reduce tasks in sequence.
@@ -66,10 +68,13 @@ func (mr *Master) run(
 	nReduce int,
 	schedule func(phase jobParse),
 ) {
+	mr.files = files
+	mr.nReduce = nReduce
+	mr.jobName = jobName
 	// Execute the Map phase
 	schedule(mapParse)
 	// Execute the Reduce phase
 	schedule(reduceParse)
 	// merge files
-	mr.merge(jobName, nReduce)
+	mr.merge()
 }
