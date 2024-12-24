@@ -52,17 +52,20 @@ Reduce nodes receive and consolidate intermediate data, processing it to generat
 - Intermediate result management
 - Task scheduling and coordination
 
-## Project Structur
+
+## Project Structure
+
 .
-├── common.go # Common types and utilities
-├── common_map.go # Map phase implementation
-├── common_reduce.go # Reduce phase implementation
-├── common_rpc.go # RPC communication
-├── master.go # Master node implementation
-├── master_rpc.go # Master RPC server
-├── master_splitmerge.go# File splitting and merging
-├── schedule.go # Task scheduling
-└── worker.go # Worker node implementation
+├── common.go            # Common types and utilities
+├── common_map.go        # Map phase implementation
+├── common_reduce.go     # Reduce phase implementation
+├── common_rpc.go        # RPC communication
+├── master.go            # Master node implementation
+├── master_rpc.go        # Master RPC server
+├── master_splitmerge.go # File splitting and merging
+├── schedule.go          # Task scheduling
+└── worker.go            # Worker node implementation
+
 
 ## Implementation Details
 
