@@ -54,7 +54,7 @@ Reduce nodes receive and consolidate intermediate data, processing it to generat
 
 
 ## Project Structure
-
+```
 .
 ├── common.go            # Common types and utilities
 ├── common_map.go        # Map phase implementation
@@ -65,6 +65,7 @@ Reduce nodes receive and consolidate intermediate data, processing it to generat
 ├── master_splitmerge.go # File splitting and merging
 ├── schedule.go          # Task scheduling
 └── worker.go            # Worker node implementation
+```
 
 
 ## Implementation Details
