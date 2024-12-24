@@ -12,6 +12,13 @@ const (
 	reduceParse jobParse = "Reduce"
 )
 
+// Constants for RPC method names
+const (
+	RegisterMethod = "Master.Register" // Method name for worker registration
+	DoTaskMethod   = "Worker.DoTask"   // Method name for task execution
+	ShutdownMethod = "Worker.Shutdown" // Method name for worker shutdown
+)
+
 // 用于保存需要传递给map和reduce的KV数据对
 type KeyValue struct {
 	Key   string
