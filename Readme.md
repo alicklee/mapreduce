@@ -40,7 +40,7 @@ Reduce nodes receive and consolidate intermediate data, processing it to generat
 2. **Concurrent Execution**
    - Distributed processing
    - Parallel execution of tasks
-   - Worker pool management
+   - Worker pool managemen
    - Fault tolerance
 
 ## Key Features
@@ -52,4 +52,22 @@ Reduce nodes receive and consolidate intermediate data, processing it to generat
 - Intermediate result management
 - Task scheduling and coordination
 
-## Project Structure
+## Project Structur
+├── common.go # Common types and utilities
+├── common_map.go # Map phase implementation
+├── common_reduce.go # Reduce phase implementation
+├── common_rpc.go # RPC communication
+├── master.go # Master node implementation
+├── master_rpc.go # Master RPC server
+├── master_splitmerge.go# File splitting and merging
+├── schedule.go # Task scheduling
+└── worker.go # Worker node implementation
+
+## Implementation Details
+
+The framework follows the MapReduce paper's design principles:
+1. Master-Worker architecture
+2. Fault-tolerant task execution
+3. Intermediate result handling
+4. Automatic task redistribution
+5. Worker pool management
