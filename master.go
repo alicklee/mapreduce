@@ -1,14 +1,30 @@
 package mapreduce
 
-import "sync"
+import (
+	"net"
+	"sync"
+)
 
 type Master struct {
 	address string // master node address
 	sync.Mutex
-	workers []string // workers RPC address cache
-	jobName jobParse // job name
-	files   []string // input files
-	nReduce int      // the number of reduce node
+	workers  []string // workers RPC address cache
+	jobName  jobParse // job name
+	files    []string // input files
+	nReduce  int      // the number of reduce node
+	newCond  *sync.Cond
+	listener net.Listener  // master RPC listener
+	shutdown chan struct{} // shutdown listener
+}
+
+// newMaster creates a new Master instance.
+func newMaster(master string) *Master {
+	mr := &Master{}
+	mr.newCond = sync.NewCond(mr)
+	mr.address = master
+	mr.shutdown = make(chan struct{})
+
+	return mr
 }
 
 // Sequential executes a MapReduce job sequentially, useful for debugging or single-node environments.
@@ -54,13 +70,6 @@ func (mr *Master) runReduceTasks(reduceF func(string, []string) string) {
 	}
 }
 
-// newMaster creates a new Master instance.
-func newMaster(master string) *Master {
-	return &Master{
-		address: master,
-	}
-}
-
 // run schedules the Map and Reduce tasks in sequence.
 func (mr *Master) run(
 	jobName jobParse,
@@ -77,4 +86,15 @@ func (mr *Master) run(
 	schedule(reduceParse)
 	// merge files
 	mr.merge()
+}
+
+// This is worker register RPC function
+func (mr *Master) Register(args *RegisterArgs, _ *struct{}) error {
+	mr.Lock()
+	defer mr.Unlock()
+	// worker registe to master
+	mr.workers = append(mr.workers, args.Worker)
+	// Broadcast to other nodes there is new worker node register
+	mr.newCond.Broadcast()
+	return nil
 }
