@@ -19,7 +19,7 @@ package main
 
 import (
     "strings"
-    "github.com/yourusername/mapreduce"
+    "github.com/alicklee/mapreduce"
 )
 
 // MapFunc splits text into words and emits (word, "1") pairs
@@ -54,7 +54,7 @@ func main() {
     )
     
     // Start some workers
-    for i := 0; i < 3; i++ {
+    for i := 0; i < len(inputFiles); i++ {
         go mapreduce.RunWorker(
             master.Address(),           // master address
             fmt.Sprintf("worker%d", i), // worker ID
