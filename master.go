@@ -1,50 +1,66 @@
+// Package mapreduce implements a simple MapReduce framework for distributed computing
+// It supports both sequential execution for debugging and distributed parallel execution
 package mapreduce
 
 import (
+	"fmt"
 	"net"
 	"sync"
 )
 
+// Master represents the master node of the MapReduce framework
+// responsible for task scheduling and worker management
 type Master struct {
-	address string // master node address
-	sync.Mutex
-	workers  []string // workers RPC address cache
-	jobName  jobParse // job name
-	files    []string // input files
-	nReduce  int      // the number of reduce node
-	newCond  *sync.Cond
-	listener net.Listener  // master RPC listener
-	shutdown chan struct{} // shutdown listener
+	// Configuration
+	jobName jobParse // Name of the current MapReduce job
+	nReduce int      // Number of reduce tasks to be executed
+	address string   // Network address of the master node
+	files   []string // List of input files to be processed
+
+	// Synchronization
+	sync.Mutex            // Mutex for protecting shared resources
+	newCond    *sync.Cond // Condition variable for worker registration notifications
+
+	// Runtime state
+	workers  []string      // List of registered worker addresses
+	listener net.Listener  // Network listener for RPC server
+	shutdown chan struct{} // Channel to signal shutdown to all goroutines
 }
 
-// newMaster creates a new Master instance.
+// newMaster creates and initializes a new Master instance
 func newMaster(master string) *Master {
 	mr := &Master{}
 	mr.newCond = sync.NewCond(mr)
 	mr.address = master
 	mr.shutdown = make(chan struct{})
-
 	return mr
 }
 
-// Sequential executes a MapReduce job sequentially, useful for debugging or single-node environments.
+// Sequential executes a MapReduce job sequentially, useful for debugging or single-node environments
 // Parameters:
-// - jobName: The name of the current job, used to distinguish between different MapReduce tasks.
-// - files: A list of input files, each serving as input for the Map phase.
-// - nReduce: The number of Reduce tasks, determining the level of parallelism in the Reduce phase.
-// - mapF: A user-defined Map function to process input files and generate intermediate key-value pairs.
-// - reduceF: A user-defined Reduce function to process intermediate key-value pairs and generate final results.
+//   - jobName: Name of the job to distinguish between different MapReduce tasks
+//   - files: List of input files, each serving as input for the Map phase
+//   - nReduce: Number of reduce tasks, determining the parallelism level in Reduce phase
+//   - mapF: User-defined Map function to process input files and generate intermediate key-value pairs
+//   - reduceF: User-defined Reduce function to process intermediate key-value pairs and generate final results
 func Sequential(
 	jobName jobParse,
 	files []string,
 	nReduce int,
 	mapF func(string, string) []KeyValue,
 	reduceF func(string, []string) string,
-) {
-	// Initialize Master to manage tasks
-	master := newMaster("master")
+) error {
+	if len(files) == 0 {
+		return fmt.Errorf("no input files provided")
+	}
+	if nReduce <= 0 {
+		return fmt.Errorf("invalid number of reduce tasks: %d", nReduce)
+	}
+	if mapF == nil || reduceF == nil {
+		return fmt.Errorf("map and reduce functions cannot be nil")
+	}
 
-	// Schedule map tasks
+	master := newMaster("master")
 	master.run(jobName, files, nReduce, func(phase jobParse) {
 		switch phase {
 		case mapParse:
@@ -53,16 +69,17 @@ func Sequential(
 			master.runReduceTasks(reduceF)
 		}
 	})
+	return nil
 }
 
-// runMapTasks executes all Map tasks.
+// runMapTasks executes all Map tasks
 func (mr *Master) runMapTasks(mapF func(string, string) []KeyValue) {
 	for i, file := range mr.files {
 		doMap(mr.jobName, i, file, mr.nReduce, mapF)
 	}
 }
 
-// runReduceTasks executes all Reduce tasks.
+// runReduceTasks executes all Reduce tasks
 func (mr *Master) runReduceTasks(reduceF func(string, []string) string) {
 	nFiles := len(mr.files)
 	for i := 0; i < mr.nReduce; i++ {
@@ -70,31 +87,86 @@ func (mr *Master) runReduceTasks(reduceF func(string, []string) string) {
 	}
 }
 
-// run schedules the Map and Reduce tasks in sequence.
+// run schedules Map and Reduce tasks in sequence
 func (mr *Master) run(
 	jobName jobParse,
 	files []string,
 	nReduce int,
 	schedule func(phase jobParse),
 ) {
+	defer mr.cleanup()
+
 	mr.files = files
 	mr.nReduce = nReduce
 	mr.jobName = jobName
-	// Execute the Map phase
+
 	schedule(mapParse)
-	// Execute the Reduce phase
 	schedule(reduceParse)
-	// merge files
 	mr.merge()
 }
 
-// This is worker register RPC function
+// Register handles worker registration RPC requests
 func (mr *Master) Register(args *RegisterArgs, _ *struct{}) error {
+	if args == nil || args.Worker == "" {
+		return fmt.Errorf("invalid worker registration arguments")
+	}
+
 	mr.Lock()
 	defer mr.Unlock()
-	// worker registe to master
+
 	mr.workers = append(mr.workers, args.Worker)
-	// Broadcast to other nodes there is new worker node register
 	mr.newCond.Broadcast()
 	return nil
+}
+
+// forwardRegistration forwards registered worker information to the scheduler
+func (mr *Master) forwardRegistration(ch chan string) {
+	i := 0
+	for {
+		mr.Lock()
+		if len(mr.workers) > i {
+			w := mr.workers[i]
+			i++ // Increment index before unlocking
+			go func(worker string) {
+				ch <- worker // Use parameter to avoid race condition
+			}(w)
+		} else {
+			mr.newCond.Wait()
+		}
+		mr.Unlock()
+	}
+}
+
+// Distributed executes MapReduce tasks in distributed mode
+// Parameters:
+//   - jobName: Name of the job
+//   - files: List of input files
+//   - nReduce: Number of reduce tasks
+//   - master: Master node identifier
+func Distributed(jobName jobParse, files []string, nReduce int, master int) (mr *Master) {
+	mr = &Master{
+		jobName: jobName,
+		files:   files,
+		nReduce: nReduce,
+	}
+
+	mr.startRPCServer() // Start RPC server
+
+	// Execute job scheduling
+	go mr.run(mr.jobName, mr.files, mr.nReduce, func(phase jobParse) {
+		ch := make(chan string)
+		go mr.forwardRegistration(ch)
+
+		schedule(mr.jobName, mr.files, mr.nReduce, phase, ch)
+	})
+
+	return mr
+}
+
+// Add cleanup method
+func (mr *Master) cleanup() {
+	if mr.listener != nil {
+		mr.listener.Close()
+	}
+	close(mr.shutdown)
 }
