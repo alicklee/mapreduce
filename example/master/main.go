@@ -12,85 +12,126 @@ import (
 	"time"
 )
 
-// jobParse 是 mapreduce 包中的类型
-type jobParse = mapreduce.JobParse
+// JobParse is the type alias for mapreduce.JobParse
+type JobParse = mapreduce.JobParse
 
-func main() {
-	//获取项目根目录
+// setupInputFiles creates example input files for word counting
+func setupInputFiles() (string, string, error) {
+	// Get project root directory
 	rootDir, err := os.Getwd()
 	if err != nil {
-		log.Fatal(err)
+		return "", "", fmt.Errorf("failed to get working directory: %v", err)
 	}
 
-	// 修复路径拼接，移除多余的 ./
+	// Create input directory path
 	inputDir := filepath.Join(rootDir, strings.TrimPrefix(mapreduce.Config["input"], "./"))
 
-	// 确保输入目录存在
+	// Ensure input directory exists
 	if err := os.MkdirAll(inputDir, 0777); err != nil {
-		log.Fatal(err)
+		return "", "", fmt.Errorf("failed to create input directory: %v", err)
 	}
 
-	// 创建示例输入文件，使用 filepath.Join 来正确拼接路径
+	// Create example input files
 	inputFile1 := filepath.Join(inputDir, "example1.txt")
 	inputFile2 := filepath.Join(inputDir, "example2.txt")
 
-	fmt.Println("Input files created:")
-	fmt.Println(inputFile1)
-	fmt.Println(inputFile2)
+	// Sample text content for word counting
+	content1 := `The quick brown fox jumps over the lazy dog
+A quick brown dog jumps over the lazy fox
+The lazy dog and fox are quick to jump`
 
-	// 初始化并启动 Master 节点
-	fmt.Println("Starting master node...")
+	content2 := `Brown foxes and dogs are all quick and lazy
+The quick brown fox likes to jump and play
+Dogs and foxes are natural enemies but can be friends`
 
-	// 配置 MapReduce 任务
-	inputFiles := []string{inputFile1, inputFile2}
-	nReduce := len(inputFiles)                        // reduce 任务数量
-	masterSocket := mapreduce.Config["master_socket"] // 使用配置文件中的 socket 地址
-
-	// 确保 socket 目录存在
-	socketDir := mapreduce.Config["socket_base"]
-	if err := os.MkdirAll(socketDir, 0777); err != nil {
-		log.Fatalf("Failed to create socket directory: %v", err)
+	// Write content to files
+	if err := os.WriteFile(inputFile1, []byte(content1), 0666); err != nil {
+		return "", "", fmt.Errorf("failed to write input file 1: %v", err)
+	}
+	if err := os.WriteFile(inputFile2, []byte(content2), 0666); err != nil {
+		return "", "", fmt.Errorf("failed to write input file 2: %v", err)
 	}
 
-	// 清理可能存在的旧 socket 文件
+	return inputFile1, inputFile2, nil
+}
+
+// setupMasterSocket prepares the socket directory and cleans up old socket files
+func setupMasterSocket() error {
+	socketDir := mapreduce.Config["socket_base"]
+	masterSocket := mapreduce.Config["master_socket"]
+
+	// Ensure socket directory exists
+	if err := os.MkdirAll(socketDir, 0777); err != nil {
+		return fmt.Errorf("failed to create socket directory: %v", err)
+	}
+
+	// Clean up any existing socket file
 	if err := os.Remove(masterSocket); err != nil && !os.IsNotExist(err) {
 		log.Printf("Warning: failed to remove old master socket: %v", err)
 	}
 
-	fmt.Printf("Master socket: %s\n", masterSocket)
-	fmt.Printf("Number of reduce tasks: %d\n", nReduce)
-	fmt.Printf("Input files: %v\n", inputFiles)
+	return nil
+}
 
-	// 创建并启动 master
-	fmt.Println("Creating and starting master...")
-	master := mapreduce.Distributed(jobParse("wordcount"), inputFiles, nReduce, masterSocket)
+func main() {
+	// Setup input files for word counting
+	inputFile1, inputFile2, err := setupInputFiles()
+	if err != nil {
+		log.Fatalf("Failed to setup input files: %v", err)
+	}
+
+	log.Println("Input files created:")
+	log.Println(inputFile1)
+	log.Println(inputFile2)
+
+	// Initialize master node
+	log.Println("Starting master node...")
+
+	// Configure MapReduce task
+	inputFiles := []string{inputFile1, inputFile2}
+	nReduce := len(inputFiles)                        // Number of reduce tasks
+	masterSocket := mapreduce.Config["master_socket"] // Master socket path
+
+	// Setup socket directory and cleanup
+	if err := setupMasterSocket(); err != nil {
+		log.Fatalf("Failed to setup master socket: %v", err)
+	}
+
+	// Print configuration information
+	log.Printf("Master socket: %s", masterSocket)
+	log.Printf("Number of reduce tasks: %d", nReduce)
+	log.Printf("Input files: %v", inputFiles)
+
+	// Create and start master
+	log.Println("Creating and starting master...")
+	master := mapreduce.Distributed(JobParse("wordcount"), inputFiles, nReduce, masterSocket)
 	if master == nil {
 		log.Fatal("Failed to create master")
 	}
 
-	fmt.Println("Waiting for workers to connect...")
+	log.Println("Waiting for workers to connect...")
 
-	// 创建一个通道用于接收中断信号
+	// Setup signal handling for graceful shutdown
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
 
-	// 在后台等待任务完成
+	// Wait for task completion in background
 	done := make(chan struct{})
 	go func() {
 		master.Wait()
 		close(done)
 	}()
 
-	// 等待任务完成或中断信号
+	// Wait for completion or interrupt
 	select {
 	case <-done:
-		fmt.Println("All tasks completed successfully")
+		log.Println("All tasks completed successfully")
 	case <-interrupt:
-		fmt.Println("\nReceived interrupt signal. Shutting down...")
-		// 给 master 一些时间来清理资源
+		log.Println("Received interrupt signal. Shutting down...")
+		// Give master time to cleanup
 		time.Sleep(time.Second)
 	}
 
-	fmt.Println("Master node completed")
-	fmt.Println("Results can be found in: ./assets/result/mrt.result.txt")
+	log.Println("Master node completed")
+	log.Println("Results can be found in: ./assets/result/mrt.result.txt")
 }
