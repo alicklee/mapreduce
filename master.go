@@ -13,7 +13,7 @@ import (
 // responsible for task scheduling and worker management
 type Master struct {
 	// Configuration
-	jobName jobParse // Name of the current MapReduce job
+	jobName JobParse // Name of the current MapReduce job
 	nReduce int      // Number of reduce tasks to be executed
 	address string   // Network address of the master node
 	files   []string // List of input files to be processed
@@ -46,7 +46,7 @@ func newMaster(master string) *Master {
 //   - mapF: User-defined Map function to process input files and generate intermediate key-value pairs
 //   - reduceF: User-defined Reduce function to process intermediate key-value pairs and generate final results
 func Sequential(
-	jobName jobParse,
+	jobName JobParse,
 	files []string,
 	nReduce int,
 	mapF func(string, string) []KeyValue,
@@ -63,7 +63,7 @@ func Sequential(
 	}
 
 	master := newMaster("master")
-	master.run(jobName, files, nReduce, func(phase jobParse) {
+	master.run(jobName, files, nReduce, func(phase JobParse) {
 		switch phase {
 		case mapParse:
 			master.runMapTasks(mapF)
@@ -91,10 +91,10 @@ func (mr *Master) runReduceTasks(reduceF func(string, []string) string) {
 
 // run schedules Map and Reduce tasks in sequence
 func (mr *Master) run(
-	jobName jobParse,
+	jobName JobParse,
 	files []string,
 	nReduce int,
-	schedule func(phase jobParse),
+	schedule func(phase JobParse),
 	finish func(),
 ) {
 	defer mr.cleanup()
@@ -159,7 +159,7 @@ func (mr *Master) forwardRegistration(ch chan string) {
 //   - files: List of input files
 //   - nReduce: Number of reduce tasks
 //   - master: Master node identifier
-func Distributed(jobName jobParse, files []string, nReduce int, master string) (mr *Master) {
+func Distributed(jobName JobParse, files []string, nReduce int, master string) (mr *Master) {
 	mr = &Master{
 		jobName:  jobName,
 		files:    files,
@@ -172,7 +172,7 @@ func Distributed(jobName jobParse, files []string, nReduce int, master string) (
 	mr.startRPCServer() // Start RPC server
 
 	// Execute job scheduling
-	go mr.run(mr.jobName, mr.files, mr.nReduce, func(phase jobParse) {
+	go mr.run(mr.jobName, mr.files, mr.nReduce, func(phase JobParse) {
 		ch := make(chan string)
 		go mr.forwardRegistration(ch)
 		schedule(mr.jobName, mr.files, mr.nReduce, phase, ch)

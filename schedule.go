@@ -10,18 +10,18 @@ import (
 type taskContext struct {
 	worker      string   // Worker address
 	taskNum     int      // Task number
-	phase       jobParse // Current phase
-	jobName     jobParse // Job name
+	phase       JobParse // Current phase
+	jobName     JobParse // Job name
 	mapFiles    []string // Input files
 	nOtherTasks int      // Number of tasks in other phase
 }
 
 // TaskScheduler manages the scheduling and execution of MapReduce tasks
 type TaskScheduler struct {
-	jobName      jobParse
+	jobName      JobParse
 	mapFiles     []string
 	nReduce      int
-	phase        jobParse
+	phase        JobParse
 	registerChan chan string
 	taskCount    int
 	wg           sync.WaitGroup
@@ -30,10 +30,10 @@ type TaskScheduler struct {
 
 // NewTaskScheduler creates a new task scheduler instance
 func NewTaskScheduler(
-	jobName jobParse,
+	jobName JobParse,
 	mapFiles []string,
 	nReduce int,
-	phase jobParse,
+	phase JobParse,
 	registerChan chan string,
 ) *TaskScheduler {
 	ts := &TaskScheduler{
@@ -56,10 +56,10 @@ func NewTaskScheduler(
 
 // schedule coordinates task distribution and execution
 func schedule(
-	jobName jobParse,
+	jobName JobParse,
 	mapFiles []string,
 	nReduce int,
-	phase jobParse,
+	phase JobParse,
 	registerChan chan string,
 ) {
 	scheduler := NewTaskScheduler(jobName, mapFiles, nReduce, phase, registerChan)

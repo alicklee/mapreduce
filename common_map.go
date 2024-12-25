@@ -33,7 +33,7 @@ import (
 // The intermediate files use JSON encoding to ensure reliable
 // data transfer between map and reduce phases.
 func doMap(
-	jobName jobParse,
+	jobName JobParse,
 	mapTaskNumber int,
 	inFile string,
 	nReduce int,

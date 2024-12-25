@@ -30,7 +30,7 @@ import (
 // The output is written in JSON format, with each line containing
 // a key-value pair produced by the reduce function.
 func doReduce(
-	jobName jobParse,
+	jobName JobParse,
 	reduceTaskNumber int,
 	outFile string,
 	nMap int,

@@ -27,9 +27,9 @@ type RegisterArgs struct {
 
 // DoTaskArgs encapsulates all necessary information for task execution RPCs.
 type DoTaskArgs struct {
-	JobName    jobParse // Unique identifier for the MapReduce job
+	JobName    JobParse // Unique identifier for the MapReduce job
 	File       string   // File to process: input file for Map, intermediate file for Reduce
-	Phase      jobParse // Current execution phase (Map or Reduce)
+	Phase      JobParse // Current execution phase (Map or Reduce)
 	TaskNumber int      // Task identifier within the current phase
 
 	// OtherTaskNumber serves dual purpose:

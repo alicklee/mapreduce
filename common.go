@@ -17,15 +17,15 @@ type KeyValue struct {
 	Value string
 }
 
-// jobParse represents the type of job phase in the MapReduce framework
-type jobParse string
+// JobParse represents the type of job phase in the MapReduce framework
+type JobParse string
 
 const (
 	// mapParse represents the Map phase of MapReduce
-	mapParse jobParse = "Map"
+	mapParse JobParse = "Map"
 
 	// reduceParse represents the Reduce phase of MapReduce
-	reduceParse jobParse = "Reduce"
+	reduceParse JobParse = "Reduce"
 )
 
 // mergeName constructs the name of an intermediate file that
@@ -36,9 +36,11 @@ const (
 //   - id: The ID of the reduce task
 //
 // Returns the constructed file name.
-func mergeName(jobName jobParse, reduceTask int) string {
-	// Create output directory if it doesn't exist
-	outDir := "./assets/output"
+func mergeName(jobName JobParse, reduceTask int) string {
+	// Use paths from the Config variable
+	outDir := Config["output"]
+
+	// Ensure the output directory exists
 	if err := os.MkdirAll(outDir, 0777); err != nil {
 		log.Printf("Failed to create output directory: %v", err)
 	}
@@ -46,7 +48,7 @@ func mergeName(jobName jobParse, reduceTask int) string {
 	return fmt.Sprintf("%s/mrtmp.%v-%d", outDir, jobName, reduceTask)
 }
 
-func reduceName(jobName jobParse, mapTaskNumber int, reduceTask int) string {
+func reduceName(jobName JobParse, mapTaskNumber int, reduceTask int) string {
 	return "./assets/output/mrtmp." + string(
 		jobName,
 	) + "-" + strconv.Itoa(

@@ -13,7 +13,7 @@ import (
 
 // ResultMerger handles the final merge phase of MapReduce results
 type ResultMerger struct {
-	jobName    jobParse
+	jobName    JobParse
 	nReduce    int
 	resultDir  string
 	resultFile string
@@ -21,12 +21,12 @@ type ResultMerger struct {
 }
 
 // NewResultMerger creates a new instance for merging results
-func NewResultMerger(jobName jobParse, nReduce int) *ResultMerger {
+func NewResultMerger(jobName JobParse, nReduce int) *ResultMerger {
 	return &ResultMerger{
 		jobName:    jobName,
 		nReduce:    nReduce,
-		resultDir:  "./assets/result",
-		resultFile: filepath.Join("./assets/result", "mrt.result.txt"),
+		resultDir:  Config["result"],
+		resultFile: filepath.Join(Config["result"], "mrt.result.txt"),
 		results:    make(map[string][]string),
 	}
 }
@@ -58,6 +58,9 @@ func (m *ResultMerger) Execute() error {
 
 // prepareResultDirectory ensures the result directory exists
 func (m *ResultMerger) prepareResultDirectory() error {
+	// Debug log to print the result directory path
+	log.Printf("Configured result directory path: %s", m.resultDir)
+
 	return os.MkdirAll(m.resultDir, 0777)
 }
 

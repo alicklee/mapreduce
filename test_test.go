@@ -95,13 +95,14 @@ func makeInputs(num int) []string {
 // init creates all necessary directories for the test environment.
 // It ensures a clean state by removing and recreating directories.
 func init() {
-	// Create all necessary directories with proper permissions
+	// Use paths from the Config variable
 	dirs := []string{
-		"./assets",
-		"./assets/input",
-		"./assets/output",
-		"/tmp/824-socket",
+		Config["output"],
+		Config["input"],
+		Config["socket_base"],
 	}
+
+	// Ensure all necessary directories exist
 	for _, dir := range dirs {
 		if err := os.RemoveAll(dir); err != nil {
 			log.Printf("Failed to remove directory %s: %v", dir, err)

@@ -1,0 +1,6 @@
+paths:
+  output: "./assets/output"
+  input: "./assets/input"
+  result: "./assets/result"
+  socket_base: "/tmp/824-socket"
+  master_socket: "/tmp/824-socket/master.sock"
